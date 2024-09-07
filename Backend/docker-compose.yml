@@ -1,0 +1,98 @@
+version: '3.9'
+
+services:
+  # Django Application Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: django-app
+    command: >
+      sh -c "python manage.py migrate &&
+        python manage.py collectstatic --no-input --clear &&
+        gunicorn --bind 0.0.0.0:8000 config.wsgi:application"
+    volumes:
+      - .:/usr/src/app
+      - static:/usr/src/app/static
+      - media:/usr/src/app/media
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    depends_on:
+      - db
+      - redis
+    restart: always
+
+  # PostgreSQL Database Service
+  db:
+    image: postgres:13
+    container_name: postgres-db
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: always
+
+  # Redis Service for Celery
+  redis:
+    image: redis:6.2
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  # Celery Worker Service
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: celery-worker
+    command: celery -A config worker -l info
+    volumes:
+      - .:/usr/src/app
+    env_file:
+      - .env
+    depends_on:
+      - app
+      - redis
+    restart: always
+
+  # Celery Beat Service for Scheduled Tasks
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: celery-beat
+    command: celery -A config beat -l info
+    volumes:
+      - .:/usr/src/app
+    env_file:
+      - .env
+    depends_on:
+      - app
+      - redis
+    restart: always
+
+  # Nginx Service for Serving the Django Application
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+      - static:/usr/src/app/static
+      - media:/usr/src/app/media
+    depends_on:
+      - app
+    restart: always
+
+
+# Volumes for Persistent Data Storage
+volumes:
+  postgres_data:
+  static:
+  media:
